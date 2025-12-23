@@ -1,0 +1,64 @@
+version: "3.9"
+
+# Minimal Airflow Setup - Only what you need
+services:
+
+  # 1. Database for Airflow
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow_db
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_pg:/var/lib/postgresql/data
+
+  # 2. Initialize Airflow (runs once)
+  airflow-init:
+    image: apache/airflow:2.7.3
+    container_name: airflow_init
+    depends_on:
+      - airflow-db
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: >
+      bash -c "airflow db migrate && 
+               airflow users create --username admin --password admin 
+               --firstname Admin --lastname User --role Admin 
+               --email admin@example.com || true"
+    restart: "no"
+
+  # 3. Web UI → http://localhost:8080
+  airflow-web:
+    image: apache/airflow:2.7.3
+    container_name: airflow_web
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  # 4. Scheduler (runs DAGs)
+  airflow-scheduler:
+    image: apache/airflow:2.7.3
+    container_name: airflow_scheduler
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: scheduler
+
+volumes:
+  airflow_pg:

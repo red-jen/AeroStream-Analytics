@@ -5,14 +5,17 @@ import joblib
 import re
 from sentence_transformers import SentenceTransformer
 import psycopg2
+from psycopg2 import pool
 from contextlib import contextmanager
+import logging
+import os
 
 # Initialize FastAPI
 app = FastAPI(title="AeroStream Sentiment Prediction API", version="1.0")
 
 # Load model and embedder at startup
 print("Loading model and embedder...")
-clf = joblib.load("../models/logreg_embedding.joblib")
+clf = joblib.load("models/logreg_embedding.joblib")
 embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 print("Ready!")
 
@@ -21,18 +24,47 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "aerostream",
     "user": "postgres",
-    "password": "postgres",
+    "password": "Ren-ji24",
     "port": 5432
 }
 
-# Database connection manager
+# Connection pool (initialized at startup)
+DB_POOL = None
+
+
+@app.on_event("startup")
+def startup_event():
+    global DB_POOL
+    try:
+        DB_POOL = pool.ThreadedConnectionPool(minconn=1, maxconn=10, **DB_CONFIG)
+        logging.info("Postgres connection pool created")
+    except Exception:
+        logging.exception("Failed to create Postgres pool; falling back to direct connections")
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    global DB_POOL
+    if DB_POOL:
+        DB_POOL.closeall()
+        logging.info("Postgres connection pool closed")
+
+
 @contextmanager
 def get_db():
-    conn = psycopg2.connect(**DB_CONFIG)
-    try:
-        yield conn
-    finally:
-        conn.close()
+    global DB_POOL
+    if DB_POOL:
+        conn = DB_POOL.getconn()
+        try:
+            yield conn
+        finally:
+            DB_POOL.putconn(conn)
+    else:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 # Text cleaning
 def clean_text(text: str) -> str:
