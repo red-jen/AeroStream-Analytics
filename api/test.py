@@ -1,11 +1,58 @@
-import requests
+from fastapi import FastAPI
+from typing import List
+from pydantic import BaseModel
+
+app = FastAPI(title="Prediction Filter API", version="1.0")
+
+mock_predictions = [
+    {"text": "Flight delayed", "airline": "United", "sentiment": "negative", "confidence": 0.9},
+    {"text": "Great service", "airline": "Delta", "sentiment": "positive", "confidence": 0.95},
+]
+@app.get("/")
+def read_root():
+    return {"message": "welcome to FastApi!"}
 
 
-tweets = requests.get("http://127.0.0.1:8001/batch?batch_size=5").json()
+class Prediction(BaseModel):
+    text: str
+    airline: str
+    sentiment: str
+    confidence: float
 
-# 2) Print each tweet to see the content
-for i, t in enumerate(tweets, 1):
-    print(f"\nTweet #{i}")
-    print("Airline :", t["airline"])
-    print("Sentiment:", t["airline_sentiment_confidence"], "(generator's confidence)")
-    print("Text    :", t["text"])
+
+
+
+@app.get("/predictions", response_model=List[dict])
+def get_predictions():
+    return mock_predictions
+
+
+
+
+
+
+@app.get("/prediction/filter", response_model=List[Prediction])
+def filter_predictions(airline: str, limit: int = 50):
+    # Filter predictions by airline
+    filtered = [p for p in mock_predictions if p["airline"].lower() == airline.lower()]
+    # Limit the results
+    return filtered[:limit]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@app.get("/prediction/filter" , response_model=List[dict])
+def filter_prediction(airline: str , limit:30):
+    dd = [b for b in mock_predictions if b['airline'].lower() == airline.lower]
+    return dd[:limit]

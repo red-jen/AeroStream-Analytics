@@ -1,7 +1,4 @@
-"""
-AeroStream Dashboard - Twitter US Airline Sentiment
-Complete dashboard with all required KPIs and aggregations
-"""
+
 import streamlit as st
 import pandas as pd
 import psycopg2
@@ -10,9 +7,9 @@ import plotly.graph_objects as go
 from datetime import datetime
 import time
 
-# ============================================
+
 # CONFIG
-# ============================================
+
 DB_CONFIG = {
     "host": "localhost",
     "database": "aerostream",
@@ -27,17 +24,8 @@ BLUE_LIGHT = "#4DA6FF"
 ORANGE = "#FF9933"
 PEACH = "#FFCC99"
 
-# Negative reasons (simulated - matches tweet generator)
-NEGATIVE_REASONS = [
-    'Customer Service Issue', 'Late Flight', "Can't Tell", 
-    'Cancelled Flight', 'Lost Luggage', 'Bad Flight',
-    'Flight Booking Problems', 'Flight Attendant Complaints',
-    'Damaged Luggage', 'longlines'
-]
-
-# ============================================
 # DATABASE
-# ============================================
+
 def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
@@ -51,9 +39,9 @@ def get_all_data():
     conn.close()
     return df
 
-# ============================================
+
 # PAGE CONFIG
-# ============================================
+
 st.set_page_config(page_title="AeroStream", page_icon="✈️", layout="wide")
 
 # CSS
@@ -89,9 +77,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================
+
 # HEADER
-# ============================================
+
 st.markdown('<div class="main-title">TWITTER US AIRLINE SENTIMENT DATASET</div>', unsafe_allow_html=True)
 
 col_r1, col_r2 = st.columns([6, 1])
@@ -105,41 +93,17 @@ try:
         st.warning("⚠️ No data. Run Airflow pipeline first.")
         st.stop()
     
-    # ============================================
+    
     # CALCULATIONS
-    # ============================================
+    
     total = len(df)
     airlines_count = df['airline'].nunique()
     sentiments = df['predicted_sentiment'].value_counts()
     neg_count = sentiments.get('negative', 0)
     neg_pct = round(neg_count / total * 100, 1) if total > 0 else 0
     
-    # Satisfaction rate by airline (positive / total per airline)
-    airline_stats = df.groupby('airline').agg({
-        'predicted_sentiment': 'count',
-        'confidence': 'mean'
-    }).rename(columns={'predicted_sentiment': 'total'})
-    
-    positive_by_airline = df[df['predicted_sentiment'] == 'positive'].groupby('airline').size()
-    airline_stats['positive'] = positive_by_airline
-    airline_stats['positive'] = airline_stats['positive'].fillna(0)
-    airline_stats['satisfaction_rate'] = (airline_stats['positive'] / airline_stats['total'] * 100).round(1)
-    airline_stats = airline_stats.reset_index()
-    
-    # Simulate negative reasons (based on negative tweets count)
-    import random
-    random.seed(42)
-    neg_reasons_count = {}
-    for reason in NEGATIVE_REASONS:
-        neg_reasons_count[reason] = random.randint(int(neg_count * 0.05), int(neg_count * 0.3))
-    neg_reasons_df = pd.DataFrame({
-        'reason': list(neg_reasons_count.keys()),
-        'count': list(neg_reasons_count.values())
-    }).sort_values('count', ascending=True)
-    
-    # ============================================
     # ROW 1: KPIs (3 required from context.md)
-    # ============================================
+    
     k1, k2, k3 = st.columns(3)
     
     with k1:
@@ -165,34 +129,10 @@ try:
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # ============================================
-    # ROW 2: Negative Reasons + Airline vs Sentiment
-    # ============================================
-    c1, c2 = st.columns(2)
     
-    # NEGATIVE REASON COUNT (Required from context.md)
-    with c1:
-        st.markdown('<div class="chart-title">NEGATIVE REASON COUNT</div>', unsafe_allow_html=True)
-        
-        fig_neg = go.Figure(go.Bar(
-            x=neg_reasons_df['count'],
-            y=neg_reasons_df['reason'],
-            orientation='h',
-            marker_color='#0066CC',
-            text=neg_reasons_df['count'],
-            textposition='outside'
-        ))
-        fig_neg.update_layout(
-            height=280,
-            margin=dict(l=0, r=50, t=10, b=0),
-            plot_bgcolor='#E6F3FF',
-            paper_bgcolor='#E6F3FF',
-            xaxis_title="Count of Negative Reason"
-        )
-        st.plotly_chart(fig_neg, use_container_width=True)
-    
-    # AIRLINE VS SENTIMENT (Required: répartition sentiments par compagnie)
-    with c2:
+    # ROW 2: AIRLINE VS SENTIMENT
+    # (Negative-reason aggregation removed per request)
+    with st.container():
         st.markdown('<div class="chart-title">AIRLINE VS SENTIMENT</div>', unsafe_allow_html=True)
         
         airline_sent = df.groupby(['airline', 'predicted_sentiment']).size().unstack(fill_value=0)
@@ -223,10 +163,9 @@ try:
         )
         st.plotly_chart(fig1, use_container_width=True)
     
-    # ============================================
-    # ROW 3: Sentiment Donut + Satisfaction Rate
-    # ============================================
-    c3, c4 = st.columns(2)
+  
+    # ROW 3: Sentiment Donut
+    c3 = st.container()
     
     # COUNT OF SENTIMENT (Donut)
     with c3:
@@ -251,31 +190,9 @@ try:
         )
         st.plotly_chart(fig2, use_container_width=True)
     
-    # SATISFACTION RATE BY AIRLINE (Required: taux de satisfaction par compagnie)
-    with c4:
-        st.markdown('<div class="chart-title">SATISFACTION RATE BY AIRLINE</div>', unsafe_allow_html=True)
-        
-        fig_sat = go.Figure(go.Bar(
-            x=airline_stats['airline'],
-            y=airline_stats['satisfaction_rate'],
-            marker_color=['#2ecc71' if x > 20 else '#e74c3c' for x in airline_stats['satisfaction_rate']],
-            text=[f"{x}%" for x in airline_stats['satisfaction_rate']],
-            textposition='outside'
-        ))
-        fig_sat.update_layout(
-            height=280,
-            margin=dict(l=0, r=0, t=30, b=0),
-            plot_bgcolor='#E6F3FF',
-            paper_bgcolor='#E6F3FF',
-            xaxis_title="Airline",
-            yaxis_title="Satisfaction Rate (%)",
-            yaxis=dict(range=[0, 100])
-        )
-        st.plotly_chart(fig_sat, use_container_width=True)
-    
-    # ============================================
+ 
     # ROW 4: Date Timeline + Volume by Airline
-    # ============================================
+
     c5, c6 = st.columns(2)
     
     # DATE VS SENTIMENT
@@ -331,9 +248,9 @@ try:
         )
         st.plotly_chart(fig_vol, use_container_width=True)
     
-    # ============================================
+  
     # ROW 5: Recent Tweets Table
-    # ============================================
+  
     st.markdown('<div class="chart-title">📋 RECENT PREDICTIONS</div>', unsafe_allow_html=True)
     st.dataframe(
         df.head(10)[['text', 'airline', 'predicted_sentiment', 'confidence']],
@@ -347,9 +264,9 @@ try:
         use_container_width=True
     )
     
-    # ============================================
+
     # AUTO-REFRESH
-    # ============================================
+    
     if auto:
         time.sleep(10)
         st.rerun()

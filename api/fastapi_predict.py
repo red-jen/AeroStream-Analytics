@@ -5,21 +5,18 @@ import joblib
 import re
 from sentence_transformers import SentenceTransformer
 import psycopg2
-from psycopg2 import pool
 from contextlib import contextmanager
-import logging
-import os
 
-# Initialize FastAPI
+# FastAPI app (open `http://127.0.0.1:8000/docs` to try endpoints)
 app = FastAPI(title="AeroStream Sentiment Prediction API", version="1.0")
 
-# Load model and embedder at startup
+# Load once when the API starts (so each request is fast)
 print("Loading model and embedder...")
 clf = joblib.load("models/logreg_embedding.joblib")
 embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 print("Ready!")
 
-# Database config
+# PostgreSQL connection settings (where predictions will be stored)
 DB_CONFIG = {
     "host": "localhost",
     "database": "aerostream",
@@ -28,52 +25,23 @@ DB_CONFIG = {
     "port": 5432
 }
 
-# Connection pool (initialized at startup)
-DB_POOL = None
-
-
-@app.on_event("startup")
-def startup_event():
-    global DB_POOL
-    try:
-        DB_POOL = pool.ThreadedConnectionPool(minconn=1, maxconn=10, **DB_CONFIG)
-        logging.info("Postgres connection pool created")
-    except Exception:
-        logging.exception("Failed to create Postgres pool; falling back to direct connections")
-
-
-@app.on_event("shutdown")
-def shutdown_event():
-    global DB_POOL
-    if DB_POOL:
-        DB_POOL.closeall()
-        logging.info("Postgres connection pool closed")
-
-
+# Small helper so we always close the DB connection properly
 @contextmanager
 def get_db():
-    global DB_POOL
-    if DB_POOL:
-        conn = DB_POOL.getconn()
-        try:
-            yield conn
-        finally:
-            DB_POOL.putconn(conn)
-    else:
-        conn = psycopg2.connect(**DB_CONFIG)
-        try:
-            yield conn
-        finally:
-            conn.close()
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
-# Text cleaning
+# Basic cleaning: remove @mentions + URLs + extra spaces
 def clean_text(text: str) -> str:
     text = re.sub(r"@\w+", "", text)
     text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-# Schemas
+# --- Request / Response schemas (Pydantic) ---
 class TweetInput(BaseModel):
     text: str
     airline: str = None
@@ -83,8 +51,8 @@ class PredictionOutput(BaseModel):
     text: str
     airline: str
     tweet_created: str
-    predicted_sentiment: str
-    confidence: float
+    predicted_sentiment: str  # "negative" | "neutral" | "positive"
+    confidence: float         # model confidence (0..1)
 
 class BatchInput(BaseModel):
     tweets: List[TweetInput]
@@ -94,16 +62,16 @@ class BatchOutput(BaseModel):
     saved_to_db: bool
     count: int
 
-# Health check
+# Quick check endpoint (useful for Docker / monitoring)
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "model": "logreg_embedding"}
 
-# Single prediction + save
+# Predict ONE tweet + save it in PostgreSQL
 @app.post("/predict", response_model=PredictionOutput)
 def predict_single(tweet: TweetInput):
     text_clean = clean_text(tweet.text)
-    embedding = embedder.encode([text_clean])
+    embedding = embedder.encode([text_clean])  # text -> vector
     
     prediction = clf.predict(embedding)[0]
     probabilities = clf.predict_proba(embedding)[0]
@@ -112,7 +80,7 @@ def predict_single(tweet: TweetInput):
     labels = {0: "negative", 1: "neutral", 2: "positive"}
     sentiment = labels[prediction]
     
-    # Save to database
+    # Save to DB (raw text + predicted label + confidence)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -130,19 +98,19 @@ def predict_single(tweet: TweetInput):
         confidence=confidence
     )
 
-# Batch prediction + save
+# Predict a LIST of tweets + save them in PostgreSQL
 @app.post("/predict_batch", response_model=BatchOutput)
 def predict_batch(batch: BatchInput):
     results = []
     
     texts_clean = [clean_text(t.text) for t in batch.tweets]
-    embeddings = embedder.encode(texts_clean)
+    embeddings = embedder.encode(texts_clean)  # list[text] -> matrix[vectors]
     predictions = clf.predict(embeddings)
     probabilities = clf.predict_proba(embeddings)
     
     labels = {0: "negative", 1: "neutral", 2: "positive"}
     
-    # Prepare results
+    # Build API response objects
     for i, tweet in enumerate(batch.tweets):
         results.append(PredictionOutput(
             text=tweet.text,
@@ -152,7 +120,7 @@ def predict_batch(batch: BatchInput):
             confidence=round(float(max(probabilities[i])), 3)
         ))
     
-    # Batch insert to database
+    # Insert all rows in one DB call (faster than many INSERTs)
     with get_db() as conn:
         cur = conn.cursor()
         data = [(r.text, r.airline, r.tweet_created or None, r.predicted_sentiment, r.confidence) 
@@ -166,7 +134,7 @@ def predict_batch(batch: BatchInput):
     
     return BatchOutput(predictions=results, saved_to_db=True, count=len(results))
 
-# Get recent predictions (for dashboard)
+# Read recent rows (dashboard uses this)
 @app.get("/predictions")
 def get_predictions(limit: int = 100):
     with get_db() as conn:
@@ -191,17 +159,17 @@ def get_predictions(limit: int = 100):
         for row in rows
     ]
 
-# Stats endpoint (for dashboard)
+# Aggregations for quick dashboard KPIs / charts
 @app.get("/stats")
 def get_stats():
     with get_db() as conn:
         cur = conn.cursor()
         
-        # Total count
+        # Total rows
         cur.execute("SELECT COUNT(*) FROM tweet_predictions")
         total = cur.fetchone()[0]
         
-        # By sentiment
+        # Group by sentiment
         cur.execute("""
             SELECT predicted_sentiment, COUNT(*) 
             FROM tweet_predictions 
@@ -209,7 +177,7 @@ def get_stats():
         """)
         by_sentiment = dict(cur.fetchall())
         
-        # By airline
+        # Group by airline
         cur.execute("""
             SELECT airline, COUNT(*) 
             FROM tweet_predictions 

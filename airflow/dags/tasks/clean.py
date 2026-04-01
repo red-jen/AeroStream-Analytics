@@ -1,18 +1,16 @@
-"""
-Task 2: Clean the tweet text
-"""
+
 import re
 
 def clean_tweets(ti):
-    """
-    Nettoie le texte des tweets (supprime @mentions, espaces)
+    # """
+    # Nettoie le texte des tweets (supprime @mentions, espaces)
     
-    Args:
-        ti: TaskInstance (pour récupérer les données de la tâche précédente)
+    # Args:
+    #     ti: TaskInstance (pour récupérer les données de la tâche précédente)
     
-    Returns:
-        Liste de tweets nettoyés
-    """
+    # Returns:
+    #     Liste de tweets nettoyés
+    # """
     # Récupérer les tweets de la tâche précédente (XCom)
     tweets = ti.xcom_pull(task_ids='fetch_tweets')
     

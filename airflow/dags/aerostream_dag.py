@@ -17,17 +17,15 @@ from tasks.fetch import fetch_tweets
 from tasks.clean import clean_tweets
 from tasks.predict import predict_sentiment
 
-# ============================================
-# CONFIGURATION
-# ============================================
+
 # Note: host.docker.internal = accès à localhost depuis Docker
 TWEET_API_URL = "http://host.docker.internal:8001"    # Générateur de tweets
 PREDICT_API_URL = "http://host.docker.internal:8000"  # API de prédiction
 BATCH_SIZE = 10                                        # Tweets par exécution
 
-# ============================================
+
 # DÉFINITION DU DAG
-# ============================================
+
 with DAG(
     dag_id="aerostream_dag",
     description="Pipeline de classification des sentiments",
@@ -56,8 +54,8 @@ with DAG(
         op_args=[PREDICT_API_URL],
     )
 
-    # ============================================
+    
     # ORDRE D'EXÉCUTION (Pipeline)
-    # ============================================
+
     task_fetch >> task_clean >> task_predict
 
